@@ -62,7 +62,7 @@ jobs:
         uses: azure/k8s-deploy@v5
         with:
           namespace: kube-news
-          manifests: k8s/
+          manifests: k8s/app.yaml
           images: ${{ steps.meta.outputs.image }}
 
       - name: Verificar rollout
