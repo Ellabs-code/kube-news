@@ -1,0 +1,198 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-news
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kube-news-secret
+  namespace: kube-news
+type: Opaque
+stringData:
+  DB_DATABASE: kubedevnews
+  DB_USERNAME: kubedevnews
+  DB_PASSWORD: "Pg#123"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kube-news-pvc
+  namespace: kube-news
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-news-db-headless
+  namespace: kube-news
+spec:
+  selector:
+    app: kube-news-db
+  clusterIP: None
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-news-db
+  namespace: kube-news
+spec:
+  selector:
+    app: kube-news-db
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kube-news-db
+  namespace: kube-news
+spec:
+  serviceName: kube-news-db-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-news-db
+  template:
+    metadata:
+      labels:
+        app: kube-news-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: kube-news-secret
+                  key: DB_DATABASE
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: kube-news-secret
+                  key: DB_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kube-news-secret
+                  key: DB_PASSWORD
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: kube-news-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-news-app
+  namespace: kube-news
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-news-app
+  template:
+    metadata:
+      labels:
+        app: kube-news-app
+    spec:
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - until nc -z kube-news-db 5432; do echo "aguardando banco..."; sleep 2; done
+      containers:
+        - name: kube-news
+          image: edivanrl/kube-news-app:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DB_HOST
+              value: kube-news-db
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: kube-news-secret
+                  key: DB_DATABASE
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: kube-news-secret
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kube-news-secret
+                  key: DB_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-news-app
+  namespace: kube-news
+spec:
+  selector:
+    app: kube-news-app
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 8080

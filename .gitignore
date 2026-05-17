@@ -68,9 +68,9 @@ node_modules/
 # # Yarn Integrity file
 # .yarn-integrity
 
-# # dotenv environment variables file
-# .env
-# .env.test
+# dotenv environment variables file
+.env
+.env.test
 
 # # parcel-bundler cache (https://parceljs.org/)
 # .cache
@@ -104,3 +104,18 @@ node_modules/
 # .tern-port
 
 *.Identifier
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+
+# Kubeconfig
+.kube/
+
+# Internal tooling
+.agents/
+.claude/
+.mcp.json
+skills-lock.json
